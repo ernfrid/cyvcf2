@@ -505,6 +505,7 @@ cdef class Variant(object):
     cdef int *_gt_alt_depths
     cdef int *_gt_phased
     cdef float *_gt_quals
+    cdef float *_sample_quals
     cdef int *_int_gt_quals
     cdef int *_gt_idxs
     cdef int _gt_nper
@@ -547,6 +548,8 @@ cdef class Variant(object):
             stdlib.free(self._gt_phased)
         if self._gt_quals != NULL:
             stdlib.free(self._gt_quals)
+        if self._sample_quals != NULL:
+            stdlib.free(self._sample_quals)
         if self._int_gt_quals != NULL:
             stdlib.free(self._int_gt_quals)
         if self._gt_idxs != NULL:
@@ -631,6 +634,17 @@ cdef class Variant(object):
             if num_chroms == 0.0:
                 return 0.0
             return float(self.num_het + 2 * self.num_hom_alt) / num_chroms
+
+    property msq:
+        def __get__(self):
+            cdef double total = 0.0
+            cdef int i = 0
+            cdef int n = 0
+            if self._sample_quals == NULL:
+                self.sample_quals
+            for i in range(self.vcf.n_samples):
+                total += self._sample_quals[i]
+            return total/float(self.num_het + self.num_hom_alt)
 
     property nucl_diversity:
         def __get__(self):
@@ -946,6 +960,23 @@ cdef class Variant(object):
 
             return np.PyArray_SimpleNewFromData(1, shape, np.NPY_INT32, self._gt_phased).astype(bool)
 
+    property sample_quals:
+        def __get__(self):
+            if self.vcf.n_samples == 0:
+                return []
+            cdef int ndst = 0, nret, n, i
+            cdef int *sq
+            cdef np.ndarray[np.float32_t, ndim=1] a
+            if self._sample_quals == NULL:
+                nret = bcf_get_format_float(self.vcf.hdr, self.b, "SQ", &self._sample_quals, &ndst)
+                if nret < 0 and nret != -2:
+                    return -1.0 + np.zeros(self.vcf.n_samples, np.float32)
+            cdef np.npy_intp shape[1]
+            shape[0] = <np.npy_intp> self.vcf.n_samples
+            a = np.PyArray_SimpleNewFromData(1, shape, np.NPY_FLOAT32, self._sample_quals)
+            # this take up 10% of the total vcf parsing time. fix!!
+            a[np.isnan(a)] = -1
+            return a
 
     property REF:
         def __get__(self):
